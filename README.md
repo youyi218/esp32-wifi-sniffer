@@ -1,11 +1,2 @@
-ESP-IDF template app
-====================
+This repo is built on esp-idf-templateis and is inspired by the [blog by Łukasz Podkalicki]( https://blog.podkalicki.com/esp32-wifi-sniffer/). On top of that, I added an output via uart1 of ESP32, the sniffer output the subtype of the packages as well.
 
-This is a template application to be used with [Espressif IoT Development Framework](https://github.com/espressif/esp-idf).
-
-Please check [ESP-IDF docs](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for getting started instructions.
-
-*Code in this repository is in the Public Domain (or CC0 licensed, at your option.)
-Unless required by applicable law or agreed to in writing, this
-software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-CONDITIONS OF ANY KIND, either express or implied.*
