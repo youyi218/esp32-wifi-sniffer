@@ -12,6 +12,7 @@
 #include "esp_wifi_types.h"
 #include "esp_system.h"
 #include "esp_event.h"
+#include "esp_sleep.h"
 #include "esp_event_loop.h"
 #include "nvs_flash.h"
 #include "driver/uart.h"
@@ -47,15 +48,24 @@ static esp_err_t event_handler(void *ctx, system_event_t *event);
 static void wifi_sniffer_init(void);
 static void wifi_sniffer_set_channel(uint8_t channel);
 static const char *wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type);
-static void wifi_sniffer_packet_handler(void *
-, wifi_promiscuous_pkt_type_t type);
+static void wifi_sniffer_packet_handler(void *buff, wifi_promiscuous_pkt_type_t type);
 const char *wifi_sniffer_packet_subtype2str(unsigned frame_control);
+static void sleep_task(void *arg);
+uint8_t previous_sender[6];
+uint8_t previous2_sender[6];
+int i;
 
 void
 app_main(void)
 {
+	for (i = 0; i <= 5; i ++)
+	{
+		previous_sender[i] = 0;
+		previous2_sender[i] = 0;
+	}
 	uint8_t channel = 1;
-
+	/* wait 1 minutes to start  */
+	vTaskDelay(10000 / portTICK_PERIOD_MS);
 	/* setup */
 	wifi_sniffer_init();
 	/* Configure parameters of an UART driver,
@@ -71,11 +81,24 @@ app_main(void)
 	uart_set_pin(UART_NUM_1, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS);
 	uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
 
+	xTaskCreate(sleep_task, "uart__task", 1024*2, NULL, configMAX_PRIORITIES, NULL);
 	/* loop */
 	while (true) {
 		vTaskDelay(WIFI_CHANNEL_SWITCH_INTERVAL / portTICK_PERIOD_MS);
 		wifi_sniffer_set_channel(channel);
-		channel = (channel % WIFI_CHANNEL_MAX) + 1;
+		if (channel == 1)
+		{
+			channel = 6;
+
+		}
+		else if (channel == 6)
+		{
+			channel = 11;
+		}
+		else
+		{
+			channel = 1;
+		}
     	}
 }
 
@@ -89,7 +112,6 @@ event_handler(void *ctx, system_event_t *event)
 void
 wifi_sniffer_init(void)
 {
-
 	nvs_flash_init();
     	tcpip_adapter_init();
     	ESP_ERROR_CHECK( esp_event_loop_init(event_handler, NULL) );
@@ -124,8 +146,8 @@ wifi_sniffer_packet_type2str(wifi_promiscuous_pkt_type_t type)
 const char *
 wifi_sniffer_packet_subtype2str(unsigned frame_control)
 {	   
-	char bin16_1[]  = "0000000000000000";
-	char *bin_subtype = malloc (sizeof(char *) * 5);
+	char bin16_1[] = "0000000000000000";
+	char bin_subtype[] = "0000";
 	int pos;
 	for (pos = 15; pos >= 0; --pos)
 	{
@@ -133,18 +155,17 @@ wifi_sniffer_packet_subtype2str(unsigned frame_control)
 	    bin16_1[pos] = '1';
 	    frame_control /= 2;
 	}
-	strncpy(bin_subtype, bin16_1, 4);
+	strncpy(bin_subtype, &bin16_1[8], 4);
 	int subtype = atoi(bin_subtype);
-	printf("%d", subtype);
 	switch(subtype) {
-	case 0000: return "ASSO_REQ";
-	case 0001: return "ASSO_RES";
-	case 0010: return "REASSO_REQ";
-	case 0011: return "REASSO_RES";
-	case 0100: return "PROBE_REQ";
-	case 0101: return "PROBE_RES";
-	case 0110: return "TIMING_AD";
-	case 0111: return "RESERVED";
+	case 0: return "ASSO_REQ";
+	case 1: return "ASSO_RES";
+	case 10: return "REASSO_REQ";
+	case 11: return "REASSO_RES";
+	case 100: return "PROBE_REQ";
+	case 101: return "PROBE_RES";
+	case 110: return "TIMING_AD";
+	case 111: return "RESERVED";
 	case 1000: return "BEACON";
 	case 1001: return "ATIM";
 	case 1010: return "DISASSO";
@@ -160,13 +181,35 @@ wifi_sniffer_packet_subtype2str(unsigned frame_control)
 void
 wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
 {
-
 	if (type != WIFI_PKT_MGMT)
 		return;
-
 	const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
 	const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
 	const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
+	// FILTER BEACON
+	if (strcmp(wifi_sniffer_packet_subtype2str(hdr->frame_ctrl),"BEACON") == 0)
+		return;
+	// FILTER PACKETS IF SOURCE IS THE SAME AS THE LAST ONE 
+	if (hdr->addr2[0] == previous_sender[0] && hdr->addr2[1] == previous_sender[1] && hdr->addr2[2] == previous_sender[2] &&
+	hdr->addr2[3] == previous_sender[3] && hdr->addr2[4] == previous_sender[4] && hdr->addr2[5] == previous_sender[5])
+	{
+		for (i = 0; i <= 5; i ++)
+		{
+			previous2_sender[i] = previous_sender[i];
+		}	
+		return;
+	}
+	// FILTER PACKETS IF SOURCE IS THE SAME AS THE ONE BEFORE LAST ONE 
+	if (hdr->addr2[0] == previous2_sender[0] && hdr->addr2[1] == previous2_sender[1] && hdr->addr2[2] == previous2_sender[2] &&
+	hdr->addr2[3] == previous2_sender[3] && hdr->addr2[4] == previous2_sender[4] && hdr->addr2[5] == previous2_sender[5])
+	{
+		for (i = 0; i <= 5; i ++)
+		{
+			previous2_sender[i] = previous_sender[i];
+			previous_sender[i] = hdr->addr2[i];
+		}	
+		return;
+	}
 	char* line_wifi = malloc(200);
 	sprintf(line_wifi,"PACKET TYPE=%s, SUBTYPE=%s, CHAN=%02d, RSSI=%02d,"
 		" ADDR1=%02x:%02x:%02x:%02x:%02x:%02x,"
@@ -186,7 +229,30 @@ wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
 		hdr->addr3[0],hdr->addr3[1],hdr->addr3[2],
 		hdr->addr3[3],hdr->addr3[4],hdr->addr3[5]
 	);
+	// OUTPUT TO UART
 	uart_write_bytes(UART_NUM_1, (const char *)line_wifi, strlen(line_wifi));
 	printf(line_wifi);
+	for (i = 0; i <= 5; i ++)
+	{
+		previous2_sender[i] = previous_sender[i];
+		previous_sender[i] = hdr->addr2[i];
+	}
 	free(line_wifi);	
 }
+
+static void sleep_task(void *arg)
+{
+	uint8_t* data = (uint8_t*) malloc(BUF_SIZE+1);
+	int wait_time = 0;
+	while (1) {
+		const int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 1000 / portTICK_RATE_MS);
+		if (len > 5) {
+			// uart_write_bytes(UART_NUM_1,(const char *) data, len);
+			wait_time = atoi((const char *) data);
+			esp_sleep_enable_timer_wakeup(wait_time);
+			esp_deep_sleep_start();
+		}
+	}
+	free(data);
+}
+
