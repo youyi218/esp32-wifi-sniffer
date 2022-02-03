@@ -53,6 +53,8 @@ const char *wifi_sniffer_packet_subtype2str(unsigned frame_control);
 static void sleep_task(void *arg);
 uint8_t previous_sender[6];
 uint8_t previous2_sender[6];
+char previous_subtype[10];
+char previous2_subtype[10];
 int i;
 
 void
@@ -158,23 +160,23 @@ wifi_sniffer_packet_subtype2str(unsigned frame_control)
 	strncpy(bin_subtype, &bin16_1[8], 4);
 	int subtype = atoi(bin_subtype);
 	switch(subtype) {
-	case 0: return "ASSO_REQ";
-	case 1: return "ASSO_RES";
-	case 10: return "REASSO_REQ";
-	case 11: return "REASSO_RES";
-	case 100: return "PROBE_REQ";
-	case 101: return "PROBE_RES";
-	case 110: return "TIMING_AD";
-	case 111: return "RESERVED";
-	case 1000: return "BEACON";
-	case 1001: return "ATIM";
-	case 1010: return "DISASSO";
-	case 1011: return "AUTH";
-	case 1100: return "DEAUTH";
-	case 1101: return "ACTION";
-	case 1110: return "NACK";
-	case 1111: return "RESERVED";
-	default: return "NOT_KNOWN";
+	case 0: return "1";
+	case 1: return "2";
+	case 10: return "3";
+	case 11: return "4";
+	case 100: return "5";
+	case 101: return "6";
+	case 110: return "7";
+	case 111: return "8";
+	case 1000: return "9";
+	case 1001: return "10";
+	case 1010: return "11";
+	case 1011: return "12";
+	case 1100: return "13";
+	case 1101: return "14";
+	case 1110: return "15";
+	case 1111: return "16";
+	default: return "0";
 	}
 }
 
@@ -187,36 +189,47 @@ wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
 	const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
 	const wifi_ieee80211_mac_hdr_t *hdr = &ipkt->hdr;
 	// FILTER BEACON
-	if (strcmp(wifi_sniffer_packet_subtype2str(hdr->frame_ctrl),"BEACON") == 0)
+	char subtype[10];
+	strcpy(subtype, wifi_sniffer_packet_subtype2str(hdr->frame_ctrl));
+	if (strcmp(subtype,"9") == 0)
 		return;
-	// FILTER PACKETS IF SOURCE IS THE SAME AS THE LAST ONE 
+	// IF SOURCE IS THE SAME AS THE LAST ONE, SEND '1' TO UART 
 	if (hdr->addr2[0] == previous_sender[0] && hdr->addr2[1] == previous_sender[1] && hdr->addr2[2] == previous_sender[2] &&
-	hdr->addr2[3] == previous_sender[3] && hdr->addr2[4] == previous_sender[4] && hdr->addr2[5] == previous_sender[5])
+	hdr->addr2[3] == previous_sender[3] && hdr->addr2[4] == previous_sender[4] && hdr->addr2[5] == previous_sender[5] && 
+	strcmp(previous_subtype, subtype) == 0)
 	{
 		for (i = 0; i <= 5; i ++)
 		{
 			previous2_sender[i] = previous_sender[i];
 		}	
+		strcpy(previous2_subtype, previous_subtype);
+		uart_write_bytes(UART_NUM_1, (const char *)"1\n", 2);
+		printf("1\n");
 		return;
 	}
-	// FILTER PACKETS IF SOURCE IS THE SAME AS THE ONE BEFORE LAST ONE 
+	// IF SOURCE IS THE SAME AS THE ONE BEFORE LAST ONE, SEND '2' TO UART 
 	if (hdr->addr2[0] == previous2_sender[0] && hdr->addr2[1] == previous2_sender[1] && hdr->addr2[2] == previous2_sender[2] &&
-	hdr->addr2[3] == previous2_sender[3] && hdr->addr2[4] == previous2_sender[4] && hdr->addr2[5] == previous2_sender[5])
+	hdr->addr2[3] == previous2_sender[3] && hdr->addr2[4] == previous2_sender[4] && hdr->addr2[5] == previous2_sender[5] &&
+	strcmp(previous2_subtype, subtype) == 0)
 	{
 		for (i = 0; i <= 5; i ++)
 		{
 			previous2_sender[i] = previous_sender[i];
 			previous_sender[i] = hdr->addr2[i];
 		}	
+		strcpy(previous2_subtype, previous_subtype);
+		strcpy(previous_subtype, subtype);
+		uart_write_bytes(UART_NUM_1, (const char *)"2\n", 2);
+		printf("2\n");
 		return;
 	}
-	char* line_wifi = malloc(200);
+	char *line_wifi = malloc(200);
 	sprintf(line_wifi,"PACKET TYPE=%s, SUBTYPE=%s, CHAN=%02d, RSSI=%02d,"
 		" ADDR1=%02x:%02x:%02x:%02x:%02x:%02x,"
 		" ADDR2=%02x:%02x:%02x:%02x:%02x:%02x,"
 		" ADDR3=%02x:%02x:%02x:%02x:%02x:%02x\n",
 		wifi_sniffer_packet_type2str(type),
-		wifi_sniffer_packet_subtype2str(hdr->frame_ctrl),
+		subtype,
 		ppkt->rx_ctrl.channel,
 		ppkt->rx_ctrl.rssi,
 		/* ADDR1 */
@@ -229,15 +242,20 @@ wifi_sniffer_packet_handler(void* buff, wifi_promiscuous_pkt_type_t type)
 		hdr->addr3[0],hdr->addr3[1],hdr->addr3[2],
 		hdr->addr3[3],hdr->addr3[4],hdr->addr3[5]
 	);
-	// OUTPUT TO UART
+	// OUTPUT TO UART INFORMATION MAC
 	uart_write_bytes(UART_NUM_1, (const char *)line_wifi, strlen(line_wifi));
+	
 	printf(line_wifi);
+
+	// MODIFY PREVIOUS AND BEFORE PREVIOUS PACKETS
+	free(line_wifi);	
 	for (i = 0; i <= 5; i ++)
 	{
 		previous2_sender[i] = previous_sender[i];
 		previous_sender[i] = hdr->addr2[i];
 	}
-	free(line_wifi);	
+	strcpy(previous2_subtype, previous_subtype);
+	strcpy(previous_subtype, subtype);
 }
 
 static void sleep_task(void *arg)
